@@ -307,7 +307,7 @@ export default function Projects() {
       <div className="grid-pattern absolute inset-0 opacity-[0.08] pointer-events-none" />
 
       <div className="relative max-w-6xl mx-auto px-6">
-        <SectionHeading eyebrow="Selected Work" title="My" accent="Projects" subtitle="Real-world applications, built end to end." index="04" />
+        <SectionHeading  title="My" accent="Projects" subtitle="Real-world applications, built end to end."/>
 
         <motion.p
           initial={{ opacity: 0, y: 10 }}

@@ -108,7 +108,7 @@ export default function Hero() {
             className="flex flex-wrap gap-x-8 gap-y-3 font-mono-label text-[11px] text-[--text-lo] uppercase tracking-[0.14em] border-t border-[--hair] pt-6 max-w-lg"
           >
             <span>STACK <span className="text-[--brass]">MERN</span></span>
-            <span>SHIPPED <span className="text-[--brass]">05 PROJECTS</span></span>
+            <span>SHIPPED <span className="text-[--brass]">06 PROJECTS</span></span>
             <span>TOP 32 <span className="text-[--brass]">NATIONAL HACKATHON</span></span>
           </motion.div>
         </div>
