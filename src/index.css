@@ -92,7 +92,9 @@ body.cursor-visible:not(.cursor-native) .cursor-dot { opacity: 1; }
   background: var(--brass);
   position: fixed; top: 0; left: 0;
   pointer-events: none; z-index: 99999;
-  box-shadow: 0 0 8px rgba(217,154,78,0.7);
+  /* dark outline keeps the diamond visible on top of brass buttons too */
+  box-shadow: 0 0 0 1.5px var(--void), 0 0 8px rgba(217,154,78,0.7);
+  will-change: transform;
 }
 /* brackets exist ONLY while locked onto an element */
 .cursor-box {
