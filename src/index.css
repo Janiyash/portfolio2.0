@@ -44,6 +44,7 @@
   --on-accent: #f6e8d5;
   --grid-line: rgba(48, 35, 28, 0.08);
   --cursor-ring: rgba(48, 35, 28, 0.4);
+  --cursor-ring-hi: rgba(48, 35, 28, 0.75);
   --dim-text: rgba(48, 35, 28, 0.65);
   --dim-text-faint: rgba(48, 35, 28, 0.35);
   --dim-border: rgba(48, 35, 28, 0.22);
@@ -75,33 +76,68 @@ section[id] { scroll-margin-top: 64px; }
 .font-display { font-family: "Fraunces", ui-serif, Georgia, serif; font-optical-sizing: auto; }
 .font-mono-label { font-family: "JetBrains Mono", ui-monospace, monospace; }
 
-body.custom-cursor-active, body.custom-cursor-active a, body.custom-cursor-active button, body.custom-cursor-active [data-hover] {
-  cursor: none;
-}
+/* hide the native cursor only while the custom one is active (not over inputs) */
+body.custom-cursor-active:not(.cursor-native),
+body.custom-cursor-active:not(.cursor-native) a,
+body.custom-cursor-active:not(.cursor-native) button,
+body.custom-cursor-active:not(.cursor-native) [data-hover] { cursor: none; }
 
-/* ── CUSTOM CURSOR: small crosshair + trailing ring, refined not neon ── */
+/* ── CUSTOM CURSOR: HUD target-lock reticle ── */
+.cursor-dot { opacity: 0; transition: opacity 0.2s, scale 0.15s; }
+body.cursor-visible:not(.cursor-native) .cursor-dot { opacity: 1; }
+.cursor-dot.pressed { scale: 0.6; }
+
 .cursor-dot {
-  width: 4px; height: 4px; border-radius: 50%;
+  width: 6px; height: 6px;
   background: var(--brass);
   position: fixed; top: 0; left: 0;
   pointer-events: none; z-index: 99999;
-  transform: translate(-50%, -50%);
+  box-shadow: 0 0 8px rgba(217,154,78,0.7);
 }
-.cursor-ring {
-  min-width: 30px; min-height: 30px; padding: 0 6px;
-  border: 1px solid var(--cursor-ring);
-  border-radius: 999px;
+/* brackets exist ONLY while locked onto an element */
+.cursor-box {
   position: fixed; top: 0; left: 0;
+  width: 30px; height: 30px;
   pointer-events: none; z-index: 99998;
-  transform: translate(-50%, -50%);
-  transition: border-color 0.22s, background 0.22s, color 0.22s;
-  display: flex; align-items: center; justify-content: center;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 9px; letter-spacing: 0.08em; color: var(--brass);
-  white-space: nowrap;
+  opacity: 0;
+  background: transparent;
+  transition: opacity 0.22s ease, background-color 0.25s ease;
+  will-change: transform, width, height;
 }
-.cursor-ring.hovered { width: 46px; height: 46px; border-color: var(--brass); transition: width 0.22s, height 0.22s, border-color 0.22s, background 0.22s, color 0.22s; }
-.cursor-ring.label { background: var(--brass); color: var(--void); font-weight: 600; border-color: var(--brass); }
+.cursor-box.locked { opacity: 1; background: rgba(217,154,78,0.06); }
+.cursor-box .c {
+  position: absolute; width: 10px; height: 10px;
+  border: 0 solid var(--brass);
+}
+.cursor-box .tl { top: 0; left: 0; border-top-width: 2px; border-left-width: 2px; }
+.cursor-box .tr { top: 0; right: 0; border-top-width: 2px; border-right-width: 2px; }
+.cursor-box .bl { bottom: 0; left: 0; border-bottom-width: 2px; border-left-width: 2px; }
+.cursor-box .br { bottom: 0; right: 0; border-bottom-width: 2px; border-right-width: 2px; }
+.cursor-box.locked.pressed .c { width: 14px; height: 14px; }
+.cursor-box .c { transition: width 0.15s, height 0.15s; }
+.cursor-tag {
+  position: absolute; left: 50%; top: calc(100% + 8px);
+  transform: translateX(-50%) translateY(-4px);
+  padding: 2px 7px; background: var(--brass); color: var(--void);
+  font-family: "JetBrains Mono", monospace; font-size: 9px; font-weight: 600;
+  letter-spacing: 0.1em; white-space: nowrap;
+  opacity: 0; transition: opacity 0.2s, transform 0.2s;
+}
+.cursor-tag.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* animatable mask radii for the portrait reveal */
+@property --mx { syntax: "<percentage>"; inherits: true; initial-value: 50%; }
+@property --my { syntax: "<percentage>"; inherits: true; initial-value: 35%; }
+@property --ri { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
+@property --ro { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
+.panther-mask {
+  --mx: 50%; --my: 35%; --ri: 0%; --ro: 0%;
+  -webkit-mask-image: radial-gradient(ellipse var(--ro) var(--ro) at var(--mx) var(--my), #000 var(--ri), transparent var(--ro));
+          mask-image: radial-gradient(ellipse var(--ro) var(--ro) at var(--mx) var(--my), #000 var(--ri), transparent var(--ro));
+  transition: --ri 0.55s cubic-bezier(.22,1,.36,1), --ro 0.55s cubic-bezier(.22,1,.36,1);
+}
+.panther-mask.on-hover { --ri: 32%; --ro: 52%; }
+.panther-mask.on-full  { --ri: 120%; --ro: 150%; transition-duration: 0.9s; }
 
 /* ── NOISE (film-grain, subtle) ── */
 body::before {
@@ -421,3 +457,8 @@ body::before {
 [data-theme="light"] .deck-card .deck-category {
   opacity: 1 !important;
 }
+
+/* "tap to activate" hint: touch devices only */
+.portrait-hint { display: none; }
+@media (hover: none) { .portrait-hint { display: block; animation: hint-pulse 2s ease-in-out infinite; } }
+@keyframes hint-pulse { 0%,100% { opacity: .45 } 50% { opacity: .95 } }

@@ -72,116 +72,134 @@ function Particles({ active }) {
 }
 
 /* ── MAIN ───────────────────────────────────────────────────── */
+/**
+ * Two interaction modes, chosen by the *pointer type of the event*
+ * (not by a one-time media query), so hybrid devices work too:
+ *
+ *  • mouse  → "hover": torch-spotlight follows the cursor
+ *  • touch  → "full" : tap toggles the full Black-Panther transformation
+ *             (a phone has no hover, so tap = on / tap again = off)
+ *
+ * The reveal is a CSS mask driven by registered custom properties
+ * (--mx --my --ri --ro, see index.css) so it animates smoothly and
+ * the cursor position is written straight to the DOM — no React
+ * re-render on every mouse move.
+ */
 export default function CinematicPortrait({ className = "" }) {
   const reduced = useReducedMotion();
   const wrapRef = useRef(null);
+  const maskRef = useRef(null);
+  const ringRef = useRef(null);
+  const lastType = useRef("mouse");
 
-  /* cursor as CSS % strings — updated on every rAF flush */
-  const [cx, setCx] = useState("50%");
-  const [cy, setCy] = useState("35%");
-  const pendingCursor = useRef(null);
-  const rafCursor     = useRef(null);
+  const [mode, setMode] = useState("off"); // "off" | "hover" | "full"
+  const [touchUsed, setTouchUsed] = useState(false);
+  const active = mode !== "off";
 
-  /* hovered controls whether the panther layer is visible */
-  const [hovered, setHovered] = useState(false);
-
-  /* mobile: tap-toggle */
-  const [isMobile] = useState(
-    () => typeof window !== "undefined" && window.matchMedia("(hover:none)").matches
-  );
-  const [tapped, setTapped] = useState(false);
-
-  /* track mouse — update cursor position immediately via rAF */
-  const onMove = useCallback((e) => {
-    if (!wrapRef.current) return;
-    const r = wrapRef.current.getBoundingClientRect();
-    const nx = Math.max(0, Math.min(1, (e.clientX - r.left)  / r.width));
-    const ny = Math.max(0, Math.min(1, (e.clientY - r.top)   / r.height));
-    pendingCursor.current = { nx, ny };
-    if (!rafCursor.current) {
-      rafCursor.current = requestAnimationFrame(() => {
-        const { nx: x, ny: y } = pendingCursor.current;
-        setCx(`${(x * 100).toFixed(2)}%`);
-        setCy(`${(y * 100).toFixed(2)}%`);
-        rafCursor.current = null;
-      });
+  const place = useCallback((e) => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const r = wrap.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * 100;
+    const y = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)) * 100;
+    const m = maskRef.current;
+    if (m) {
+      m.style.setProperty("--mx", x.toFixed(2) + "%");
+      m.style.setProperty("--my", y.toFixed(2) + "%");
+    }
+    const ring = ringRef.current;
+    if (ring) {
+      ring.style.left = `calc(${x}% - 23px)`;
+      ring.style.top = `calc(${y}% - 23px)`;
     }
   }, []);
 
-  const onEnter = useCallback(() => setHovered(true),  []);
-  const onLeave = useCallback(() => setHovered(false), []);
+  const onPointerEnter = (e) => {
+    lastType.current = e.pointerType;
+    if (e.pointerType !== "mouse") return;
+    place(e);
+    setMode("hover");
+  };
+  const onPointerMove = (e) => {
+    if (e.pointerType !== "mouse") return;
+    place(e);
+  };
+  const onPointerLeave = (e) => {
+    if (e.pointerType !== "mouse") return;
+    setMode("off");
+  };
+  const onPointerDown = (e) => {
+    lastType.current = e.pointerType;
+  };
 
-  const onTap = useCallback(() => {
-    if (!isMobile) return;
-    setTapped(v => !v);
-    setHovered(v => !v);
-  }, [isMobile]);
+  // Tap / click. On touch (and pen) this toggles the full reveal.
+  const onClick = (e) => {
+    if (lastType.current === "mouse") return;
+    setTouchUsed(true);
+    place(e); // transformation spreads out from where you tapped
+    setMode((m) => (m === "full" ? "off" : "full"));
+  };
 
-  useEffect(() => () => {
-    if (rafCursor.current) cancelAnimationFrame(rafCursor.current);
+  useEffect(() => {
+    // keep "full" state off if the user scrolls the portrait away
+    const el = wrapRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([en]) => {
+      if (!en.isIntersecting) setMode((m) => (m === "full" ? "off" : m));
+    }, { threshold: 0.1 });
+    io.observe(el);
+    return () => io.disconnect();
   }, []);
 
-  /* ─── reveal mask ──────────────────────────────────────────
-   *
-   * The panther sits on top of the portrait (z-index above).
-   * Its CSS mask-image is a radial gradient centred on the cursor:
-   *   inside radius  → black  (panther visible)
-   *   feather zone   → fade
-   *   outside        → transparent (portrait shows through)
-   *
-   * Radius when hovered:  38% (contained spotlight, not full bleed)
-   * Radius when not:       0% (panther invisible)
-   *
-   * The CSS transition on mask-image itself handles the smooth
-   * in/out — NO JavaScript animation loop needed for the reveal.
-   * Cursor tracking is instant (no easing on position).
-   * Reveal on hover-enter / leave uses CSS transition: 0.55s ease.
-   */
-  const R_IN  = hovered ? 32 : 0;   // inner solid radius %
-  const R_OUT = hovered ? 52 : 0;   // outer feather radius %
+  const maskClass =
+    "absolute inset-0 z-20 pointer-events-none " +
+    (reduced ? "" : "panther-mask ") +
+    (mode === "hover" ? "on-hover" : mode === "full" ? "on-full" : "");
 
-  // For reduced motion: simple opacity swap
-  const pantherStyle = reduced
-    ? {
-        opacity: hovered ? 1 : 0,
-        transition: "opacity 0.3s ease",
-      }
-    : {
-        WebkitMaskImage: `radial-gradient(ellipse ${R_OUT}% ${R_OUT}% at ${cx} ${cy}, black ${R_IN}%, transparent ${R_OUT}%)`,
-        maskImage:        `radial-gradient(ellipse ${R_OUT}% ${R_OUT}% at ${cx} ${cy}, black ${R_IN}%, transparent ${R_OUT}%)`,
-        // transition ONLY on mask-size (the % values), NOT position — position tracks instantly
-        transition: "mask-image 0.50s ease, -webkit-mask-image 0.50s ease",
-        willChange: "mask-image",
-      };
-
-  /* gold edge ring at cursor — follows instantly, fades in/out with hover */
-  const ringSize = 46; // px — fixed pixel ring, looks crisp
+  const reducedStyle = reduced
+    ? { opacity: active ? 1 : 0, transition: "opacity 0.3s ease" }
+    : undefined;
 
   return (
     <div
       ref={wrapRef}
       className={`relative select-none -mt-20 ${className}`}
-      onPointerEnter={!isMobile ? onEnter : undefined}
-      onPointerLeave={!isMobile ? onLeave : undefined}
-      onMouseMove={!isMobile ? onMove : undefined}
-      onClick={isMobile ? onTap : undefined}
-      style={{ cursor: "none" }}
+      onPointerEnter={onPointerEnter}
+      onPointerMove={onPointerMove}
+      onPointerLeave={onPointerLeave}
+      onPointerDown={onPointerDown}
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      aria-pressed={mode === "full"}
+      aria-label="Toggle Black Panther mode"
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setMode((m) => (m === "off" ? "full" : "off"));
+        }
+      }}
+      style={{
+        cursor: "none",
+        touchAction: "manipulation",
+        WebkitTapHighlightColor: "transparent",
+        WebkitTouchCallout: "none",
+        outline: "none",
+      }}
     >
-      {/* ── ambient base glow ── */}
+      {/* ambient base glow */}
       <div
         aria-hidden="true"
         className="absolute inset-x-8 -bottom-6 top-16 -z-10 pointer-events-none"
         style={{
-          background: `radial-gradient(ellipse at 50% 85%, rgba(217,154,78,${hovered ? 0.28 : 0.07}) 0%, transparent 65%)`,
+          background: `radial-gradient(ellipse at 50% 85%, rgba(217,154,78,${active ? 0.28 : 0.07}) 0%, transparent 65%)`,
           filter: "blur(30px)",
           transition: "background 0.6s ease",
         }}
       />
 
-      {/* ── image stack — both 560×560, heads aligned ── */}
       <div className="relative" style={{ isolation: "isolate" }}>
-
-        {/* LAYER 1 — Portrait (always visible) */}
+        {/* LAYER 1 — portrait */}
         <img
           src={heroCutout}
           alt="Yash Jani"
@@ -190,17 +208,13 @@ export default function CinematicPortrait({ className = "" }) {
           draggable="false"
           className="relative z-10 w-full h-auto object-contain block"
           style={{
-            filter: `drop-shadow(0 22px 44px rgba(0,0,0,0.80)) drop-shadow(0 0 ${hovered ? 22 : 6}px rgba(217,154,78,${hovered ? 0.22 : 0.06}))`,
+            filter: `drop-shadow(0 22px 44px rgba(0,0,0,0.80)) drop-shadow(0 0 ${active ? 22 : 6}px rgba(217,154,78,${active ? 0.22 : 0.06}))`,
             transition: "filter 0.5s ease",
           }}
         />
 
-        {/* LAYER 2 — Panther (revealed by cursor mask) */}
-        <div
-          aria-hidden="true"
-          className="absolute inset-0 z-20 pointer-events-none"
-          style={pantherStyle}
-        >
+        {/* LAYER 2 — panther, revealed by mask */}
+        <div ref={maskRef} aria-hidden="true" className={maskClass} style={reducedStyle}>
           <img
             src={pantherActivated}
             alt=""
@@ -209,34 +223,33 @@ export default function CinematicPortrait({ className = "" }) {
             draggable="false"
             className="w-full h-auto object-contain block"
             style={{
-              filter: `drop-shadow(0 0 28px rgba(217,154,78,0.55)) drop-shadow(0 22px 44px rgba(0,0,0,0.9))`,
+              filter: "drop-shadow(0 0 28px rgba(217,154,78,0.55)) drop-shadow(0 22px 44px rgba(0,0,0,0.9))",
             }}
           />
         </div>
 
-        {/* LAYER 3 — gold ring at cursor edge (desktop only) */}
-        {!reduced && !isMobile && hovered && (
+        {/* LAYER 3 — gold ring (mouse only) */}
+        {!reduced && mode === "hover" && (
           <div
+            ref={ringRef}
             aria-hidden="true"
             className="absolute z-[35] pointer-events-none rounded-full"
             style={{
-              width:  ringSize,
-              height: ringSize,
-              left: `calc(${cx} - ${ringSize / 2}px)`,
-              top:  `calc(${cy} - ${ringSize / 2}px)`,
+              width: 46,
+              height: 46,
+              left: "50%",
+              top: "35%",
               border: "1.5px solid rgba(217,154,78,0.70)",
               boxShadow: "0 0 10px 2px rgba(217,154,78,0.25), inset 0 0 8px 1px rgba(217,154,78,0.12)",
-              // ring position tracks instantly too
             }}
           />
         )}
 
         {/* LAYER 4 — particles */}
-        {!reduced && <Particles active={hovered} />}
-
+        {!reduced && <Particles active={active} />}
       </div>
 
-      {/* ── corner brackets ── */}
+      {/* corner brackets */}
       <div className="absolute inset-0 pointer-events-none z-40" aria-hidden="true">
         {[
           "top-0 left-0 border-t-2 border-l-2 -translate-x-0.5 -translate-y-0.5",
@@ -248,33 +261,32 @@ export default function CinematicPortrait({ className = "" }) {
             key={i}
             className={`absolute w-5 h-5 ${cls}`}
             style={{
-              borderColor: `rgba(217,154,78,${hovered ? 0.95 : 0.45})`,
+              borderColor: `rgba(217,154,78,${active ? 0.95 : 0.45})`,
               transition: "border-color 0.4s ease",
             }}
           />
         ))}
       </div>
 
-      {/* ── caption ── */}
+      {/* caption */}
       <div className="flex items-center gap-3 mt-2" aria-hidden="true">
         <span className="h-px flex-1 bg-[--hair]" />
         <span
           className="font-mono-label text-[12px] tracking-[0.15em] uppercase whitespace-nowrap"
-          style={{
-            color: hovered ? "var(--brass)" : "var(--text-lo)",
-            transition: "color 0.4s ease",
-          }}
+          style={{ color: active ? "var(--brass)" : "var(--text-lo)", transition: "color 0.4s ease" }}
         >
-          {hovered ? "SYSTEM ACTIVE" : "YASH JANI"}
+          {active ? "SYSTEM ACTIVE" : "YASH JANI"}
         </span>
         <span className="h-px flex-1 bg-[--hair]" />
       </div>
 
-      {isMobile && !tapped && (
-        <p className="text-center font-mono-label text-[9px] text-[--text-lo] tracking-widest uppercase mt-1 opacity-50">
-          TAP TO REVEAL
-        </p>
-      )}
+      {/* touch hint — only shown on touch devices (hidden for mouse users via media query) */}
+      <p
+        className="portrait-hint text-center font-mono-label text-[10px] text-[--brass] tracking-[0.25em] uppercase mt-2"
+        style={{ opacity: touchUsed ? 0 : 0.8, transition: "opacity 0.4s ease" }}
+      >
+        ◆ Tap portrait to activate ◆
+      </p>
     </div>
   );
 }
