@@ -36,16 +36,17 @@ export default function CustomCursor() {
     let raf;
 
     const onMove = (e) => {
+      if (e.pointerType && e.pointerType !== "mouse") return;
       mouse.x = e.clientX;
       mouse.y = e.clientY;
-      if (dotRef.current) {
-        dotRef.current.style.transform = `translate(${mouse.x}px, ${mouse.y}px) translate(-50%, -50%) rotate(45deg)`;
-      }
       document.body.classList.add("cursor-visible");
     };
 
     const tick = () => {
       const b = boxRef.current;
+      if (dotRef.current) {
+        dotRef.current.style.transform = `translate3d(${mouse.x}px, ${mouse.y}px, 0) translate(-50%, -50%) rotate(45deg)`;
+      }
       if (target) {
         // re-measure each frame so it stays glued while scrolling / animating
         const r = target.el.getBoundingClientRect();
@@ -116,7 +117,8 @@ export default function CustomCursor() {
     const onUp = () => { dotRef.current?.classList.remove("pressed"); boxRef.current?.classList.remove("pressed"); };
     const onLeaveDoc = () => document.body.classList.remove("cursor-visible");
 
-    document.addEventListener("mousemove", onMove, { passive: true });
+    window.addEventListener("pointermove", onMove, { passive: true, capture: true });
+    window.addEventListener("mousemove", onMove, { passive: true, capture: true });
     document.addEventListener("mouseover", onOver);
     document.addEventListener("mouseout", onOut);
     document.addEventListener("mousedown", onDown);
@@ -125,7 +127,8 @@ export default function CustomCursor() {
     raf = requestAnimationFrame(tick);
 
     return () => {
-      document.removeEventListener("mousemove", onMove);
+      window.removeEventListener("pointermove", onMove, { capture: true });
+      window.removeEventListener("mousemove", onMove, { capture: true });
       document.removeEventListener("mouseover", onOver);
       document.removeEventListener("mouseout", onOut);
       document.removeEventListener("mousedown", onDown);
