@@ -29,7 +29,7 @@ export default function Hero() {
             transition={{ duration: 0.6 }}
             className="font-mono-label text-[13px] tracking-[0.25em] text-[--brass] uppercase mb-6"
           >
-            Full Stack Developer · Systems Engineer
+            Full Stack Developer
           </motion.p>
 
           <motion.h1
@@ -89,8 +89,8 @@ export default function Hero() {
               <span className="transition-transform group-hover:translate-x-1">→</span>
             </a>
             <a
-              href="/Resume.pdf"
-              download="Yash_Jani_Resume.pdf"
+              href="/Yash Jani-Resume.pdf"
+              download="Yash Jani-Resume.pdf"
               data-cursor="hover"
               className="relative px-8 py-4 font-mono-label text-[13px] tracking-[0.15em] uppercase text-[--text-hi] bg-[--surface] border border-[--hair] hover:border-[--brass] hover:text-[--brass] transition-colors flex items-center gap-3 cursor-pointer"
             >
