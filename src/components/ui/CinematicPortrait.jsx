@@ -1,15 +1,15 @@
 /**
  * CinematicPortrait — cursor-torch reveal
  *
- * • No delay — reveal tracks cursor instantly from the first pixel
- * • Small-to-medium reveal radius (not full image)  
- * • Smooth CSS transition on the mask itself
- * • Both images on identical 560×560 canvas, heads perfectly aligned
- * • Zero tilt / rotateX / rotateY
+ * Hover over the portrait → a circular spotlight follows your cursor,
+ * revealing the Black Panther image underneath.
+ * Move cursor → spotlight moves instantly.
+ * Leave image → spotlight closes smoothly.
+ * Touch → tap to toggle full reveal.
  */
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import heroCutout      from "../../assets/photo1.png";
+import heroCutout       from "../../assets/photo1.png";
 import pantherActivated from "../../assets/pan.png";
 import useReducedMotion from "../../hooks/useReducedMotion";
 
@@ -72,36 +72,25 @@ function Particles({ active }) {
 }
 
 /* ── MAIN ───────────────────────────────────────────────────── */
-/**
- * Two interaction modes, chosen by the *pointer type of the event*
- * (not by a one-time media query), so hybrid devices work too:
- *
- *  • mouse  → "hover": torch-spotlight follows the cursor
- *  • touch  → "full" : tap toggles the full Black-Panther transformation
- *             (a phone has no hover, so tap = on / tap again = off)
- *
- * The reveal is a CSS mask driven by registered custom properties
- * (--mx --my --ri --ro, see index.css) so it animates smoothly and
- * the cursor position is written straight to the DOM — no React
- * re-render on every mouse move.
- */
 export default function CinematicPortrait({ className = "" }) {
-  const reduced = useReducedMotion();
-  const wrapRef = useRef(null);
-  const maskRef = useRef(null);
-  const ringRef = useRef(null);
-  const lastType = useRef("mouse");
+  const reduced   = useReducedMotion();
+  const wrapRef   = useRef(null);
+  const maskRef   = useRef(null);
+  const ringRef   = useRef(null);
+  const lastType  = useRef("mouse");
 
-  const [mode, setMode] = useState("off"); // "off" | "hover" | "full"
+  const [mode, setMode]           = useState("off"); // "off" | "hover" | "full"
   const [touchUsed, setTouchUsed] = useState(false);
   const active = mode !== "off";
 
+  /* Write cursor position straight to DOM — no React re-render per frame */
   const place = useCallback((e) => {
     const wrap = wrapRef.current;
     if (!wrap) return;
     const r = wrap.getBoundingClientRect();
-    const x = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * 100;
-    const y = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)) * 100;
+    const x = Math.max(0, Math.min(1, (e.clientX - r.left)  / r.width))  * 100;
+    const y = Math.max(0, Math.min(1, (e.clientY - r.top)   / r.height)) * 100;
+
     const m = maskRef.current;
     if (m) {
       m.style.setProperty("--mx", x.toFixed(2) + "%");
@@ -110,7 +99,7 @@ export default function CinematicPortrait({ className = "" }) {
     const ring = ringRef.current;
     if (ring) {
       ring.style.left = `calc(${x}% - 23px)`;
-      ring.style.top = `calc(${y}% - 23px)`;
+      ring.style.top  = `calc(${y}% - 23px)`;
     }
   }, []);
 
@@ -120,7 +109,7 @@ export default function CinematicPortrait({ className = "" }) {
     place(e);
     setMode("hover");
   };
-  const onPointerMove = (e) => {
+  const onPointerMove  = (e) => {
     if (e.pointerType !== "mouse") return;
     place(e);
   };
@@ -128,20 +117,16 @@ export default function CinematicPortrait({ className = "" }) {
     if (e.pointerType !== "mouse") return;
     setMode("off");
   };
-  const onPointerDown = (e) => {
-    lastType.current = e.pointerType;
-  };
+  const onPointerDown  = (e) => { lastType.current = e.pointerType; };
 
-  // Tap / click. On touch (and pen) this toggles the full reveal.
   const onClick = (e) => {
     if (lastType.current === "mouse") return;
     setTouchUsed(true);
-    place(e); // transformation spreads out from where you tapped
+    place(e);
     setMode((m) => (m === "full" ? "off" : "full"));
   };
 
   useEffect(() => {
-    // keep "full" state off if the user scrolls the portrait away
     const el = wrapRef.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
     const io = new IntersectionObserver(([en]) => {
@@ -163,7 +148,7 @@ export default function CinematicPortrait({ className = "" }) {
   return (
     <div
       ref={wrapRef}
-      className={`relative select-none -mt-20 ${className}`}
+      className={`relative select-none ${className}`}
       onPointerEnter={onPointerEnter}
       onPointerMove={onPointerMove}
       onPointerLeave={onPointerLeave}
@@ -198,13 +183,17 @@ export default function CinematicPortrait({ className = "" }) {
         }}
       />
 
+      {/*
+        Both images share the EXACT same container so their bounding
+        boxes overlap pixel-perfectly. The panther layer is absolute
+        inset-0 on top of the portrait.
+      */}
       <div className="relative" style={{ isolation: "isolate" }}>
-        {/* LAYER 1 — portrait */}
+
+        {/* LAYER 1 — Yash portrait (always visible) */}
         <img
           src={heroCutout}
           alt="Yash Jani"
-          width="560"
-          height="560"
           draggable="false"
           className="relative z-10 w-full h-auto object-contain block"
           style={{
@@ -213,13 +202,16 @@ export default function CinematicPortrait({ className = "" }) {
           }}
         />
 
-        {/* LAYER 2 — panther, revealed by mask */}
-        <div ref={maskRef} aria-hidden="true" className={maskClass} style={reducedStyle}>
+        {/* LAYER 2 — Black Panther, revealed by circular mask at cursor */}
+        <div
+          ref={maskRef}
+          aria-hidden="true"
+          className={maskClass}
+          style={reducedStyle}
+        >
           <img
             src={pantherActivated}
             alt=""
-            width="560"
-            height="560"
             draggable="false"
             className="w-full h-auto object-contain block"
             style={{
@@ -228,7 +220,7 @@ export default function CinematicPortrait({ className = "" }) {
           />
         </div>
 
-        {/* LAYER 3 — gold ring (mouse only) */}
+        {/* LAYER 3 — gold ring that follows cursor (mouse only) */}
         {!reduced && mode === "hover" && (
           <div
             ref={ringRef}
@@ -241,15 +233,16 @@ export default function CinematicPortrait({ className = "" }) {
               top: "35%",
               border: "1.5px solid rgba(217,154,78,0.70)",
               boxShadow: "0 0 10px 2px rgba(217,154,78,0.25), inset 0 0 8px 1px rgba(217,154,78,0.12)",
+              transition: "none",
             }}
           />
         )}
 
-        {/* LAYER 4 — particles */}
+        {/* LAYER 4 — floating gold particles */}
         {!reduced && <Particles active={active} />}
       </div>
 
-      {/* corner brackets */}
+      {/* corner HUD brackets */}
       <div className="absolute inset-0 pointer-events-none z-40" aria-hidden="true">
         {[
           "top-0 left-0 border-t-2 border-l-2 -translate-x-0.5 -translate-y-0.5",
@@ -268,7 +261,7 @@ export default function CinematicPortrait({ className = "" }) {
         ))}
       </div>
 
-      {/* caption */}
+      {/* caption line */}
       <div className="flex items-center gap-3 mt-2" aria-hidden="true">
         <span className="h-px flex-1 bg-[--hair]" />
         <span
@@ -280,12 +273,12 @@ export default function CinematicPortrait({ className = "" }) {
         <span className="h-px flex-1 bg-[--hair]" />
       </div>
 
-      {/* touch hint — only shown on touch devices (hidden for mouse users via media query) */}
+      {/* touch-only hint */}
       <p
         className="portrait-hint text-center font-mono-label text-[10px] text-[--brass] tracking-[0.25em] uppercase mt-2"
         style={{ opacity: touchUsed ? 0 : 0.8, transition: "opacity 0.4s ease" }}
       >
-        ◆ Tap portrait to activate ◆
+        ◆ Tap to activate ◆
       </p>
     </div>
   );
