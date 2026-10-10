@@ -34,8 +34,12 @@
   <body>
     <!--
       Static content for crawlers and pre-render scanners.
-      React hydrates over this on load.
+      React hydrates over this on load. Hidden visually, readable by bots.
     -->
+    <style>
+      #seo-static { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    </style>
+    <div id="seo-static" aria-hidden="true">
     <header>
       <nav>
         <a href="#home">Home</a>
@@ -67,6 +71,7 @@
         Available for internships and full-time roles.
       </p>
     </main>
+    </div>
 
     <div id="yj-app"></div>
     <script type="module" src="/src/main.jsx"></script>
