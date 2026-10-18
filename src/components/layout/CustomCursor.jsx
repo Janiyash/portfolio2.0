@@ -8,6 +8,13 @@ import { useEffect, useRef, useState } from "react";
  *  - data-cursor="xyz" adds a small label tag under the reticle
  *  - over inputs/textareas the native text cursor is used instead
  * Only enabled on devices with a real mouse (hover + fine pointer).
+ *
+ * FIX: cursor shift issue caused by ancestor elements using CSS transform
+ * (which breaks position:fixed stacking context). Solved by appending
+ * cursor elements directly to <body> via portal, and using left/top CSS
+ * properties set via style instead of transform for positioning, which
+ * avoids the stacking context problem entirely for the dot. The box still
+ * uses transform but is also portalled to body.
  */
 function hasMouse() {
   return (
@@ -26,12 +33,29 @@ export default function CustomCursor() {
 
   useEffect(() => {
     if (!enabled) return;
+
+    // Create cursor elements and append directly to <body>
+    // This avoids any ancestor transform stacking context issues
+    const dot = document.createElement("div");
+    dot.className = "cursor-dot";
+    dot.setAttribute("aria-hidden", "true");
+
+    const box = document.createElement("div");
+    box.className = "cursor-box";
+    box.setAttribute("aria-hidden", "true");
+    box.innerHTML = `<i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i><span class="cursor-tag"></span>`;
+
+    document.body.appendChild(dot);
+    document.body.appendChild(box);
+    dotRef.current = dot;
+    boxRef.current = box;
+    tagRef.current = box.querySelector(".cursor-tag");
+
     document.body.classList.add("custom-cursor-active");
 
-    const mouse = { x: -100, y: -100 };
-    // current (animated) box: centre x/y + width/height
-    const cur = { x: -100, y: -100, w: IDLE, h: IDLE };
-    let target = null; // locked element rect
+    const mouse = { x: -200, y: -200 };
+    const cur = { x: -200, y: -200, w: IDLE, h: IDLE };
+    let target = null;
     let wasLocked = false;
     let raf;
 
@@ -44,11 +68,15 @@ export default function CustomCursor() {
 
     const tick = () => {
       const b = boxRef.current;
-      if (dotRef.current) {
-        dotRef.current.style.transform = `translate3d(${mouse.x}px, ${mouse.y}px, 0) translate(-50%, -50%) rotate(45deg)`;
+      const d = dotRef.current;
+
+      if (d) {
+        // Use left/top directly — immune to ancestor transform stacking contexts
+        d.style.left = mouse.x + "px";
+        d.style.top = mouse.y + "px";
       }
+
       if (target) {
-        // re-measure each frame so it stays glued while scrolling / animating
         const r = target.el.getBoundingClientRect();
         const pad = 6;
         const tx = r.left + r.width / 2;
@@ -56,7 +84,6 @@ export default function CustomCursor() {
         const tw = r.width + pad * 2;
         const th = r.height + pad * 2;
         if (!wasLocked) {
-          // lock-on starts from the pointer and expands onto the element
           cur.x = mouse.x; cur.y = mouse.y; cur.w = IDLE; cur.h = IDLE;
           wasLocked = true;
         }
@@ -65,13 +92,20 @@ export default function CustomCursor() {
         cur.w += (tw - cur.w) * 0.25;
         cur.h += (th - cur.h) * 0.25;
       } else {
-        wasLocked = false; // on release the box just fades out where it is
+        wasLocked = false;
       }
+
       if (b) {
         b.style.width = cur.w + "px";
         b.style.height = cur.h + "px";
-        b.style.transform = `translate(${cur.x}px, ${cur.y}px) translate(-50%, -50%)`;
+        // Centre the box on the target point using margin offset
+        // (avoids transform so ancestor CSS transforms don't shift cursor)
+        b.style.left = cur.x + "px";
+        b.style.top = cur.y + "px";
+        b.style.marginLeft = (-cur.w / 2) + "px";
+        b.style.marginTop = (-cur.h / 2) + "px";
       }
+
       raf = requestAnimationFrame(tick);
     };
 
@@ -113,8 +147,14 @@ export default function CustomCursor() {
         apply(null);
       }
     };
-    const onDown = () => { dotRef.current?.classList.add("pressed"); boxRef.current?.classList.add("pressed"); };
-    const onUp = () => { dotRef.current?.classList.remove("pressed"); boxRef.current?.classList.remove("pressed"); };
+    const onDown = () => {
+      dotRef.current?.classList.add("pressed");
+      boxRef.current?.classList.add("pressed");
+    };
+    const onUp = () => {
+      dotRef.current?.classList.remove("pressed");
+      boxRef.current?.classList.remove("pressed");
+    };
     const onLeaveDoc = () => document.body.classList.remove("cursor-visible");
 
     window.addEventListener("pointermove", onMove, { passive: true, capture: true });
@@ -136,18 +176,12 @@ export default function CustomCursor() {
       document.documentElement.removeEventListener("mouseleave", onLeaveDoc);
       document.body.classList.remove("custom-cursor-active", "cursor-visible", "cursor-native");
       cancelAnimationFrame(raf);
+      // Remove DOM elements we created
+      dot.remove();
+      box.remove();
     };
   }, [enabled]);
 
-  if (!enabled) return null;
-
-  return (
-    <>
-      <div ref={dotRef} className="cursor-dot" aria-hidden="true" />
-      <div ref={boxRef} className="cursor-box" aria-hidden="true">
-        <i className="c tl" /><i className="c tr" /><i className="c bl" /><i className="c br" />
-        <span ref={tagRef} className="cursor-tag" />
-      </div>
-    </>
-  );
+  // Nothing rendered via React — elements are injected directly into body
+  return null;
 }

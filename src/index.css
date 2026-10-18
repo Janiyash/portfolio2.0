@@ -90,19 +90,28 @@ body.cursor-visible:not(.cursor-native) .cursor-dot { opacity: 1; }
 .cursor-dot {
   width: 6px; height: 6px;
   background: var(--brass);
-  position: fixed; top: 0; left: 0;
+  /* FIX: use position:fixed on <body> child with margin offset instead of
+     transform, so ancestor CSS transforms don't break the stacking context */
+  position: fixed;
+  top: 0; left: 0;
+  margin-left: -3px; /* -width/2 */
+  margin-top: -3px;  /* -height/2 */
   pointer-events: none; z-index: 99999;
   box-shadow: 0 0 8px rgba(217,154,78,0.7);
 }
 /* brackets exist ONLY while locked onto an element */
 .cursor-box {
-  position: fixed; top: 0; left: 0;
+  position: fixed;
+  top: 0; left: 0;
   width: 30px; height: 30px;
+  /* FIX: centre via margin instead of transform to avoid stacking context shift */
+  margin-left: -15px; /* -width/2 */
+  margin-top: -15px;  /* -height/2 */
   pointer-events: none; z-index: 99998;
   opacity: 0;
   background: transparent;
   transition: opacity 0.22s ease, background-color 0.25s ease;
-  will-change: transform, width, height;
+  will-change: left, top, width, height;
 }
 .cursor-box.locked { opacity: 1; background: rgba(217,154,78,0.06); }
 .cursor-box .c {
