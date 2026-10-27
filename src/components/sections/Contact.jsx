@@ -248,7 +248,6 @@ export default function Contact() {
         body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) console.error("Contact API error:", res.status, data);
 
       if (res.status === 429) {
         toast.error(data.error || "Daily message limit reached. Please try again tomorrow.", { style: { background: "var(--surface)", color: "#ff6b6b", border: "1px solid #ff444460", borderRadius: 0 } });
@@ -265,7 +264,7 @@ export default function Contact() {
       formRef.current.reset(); setChars(0);
       setTimeout(() => setSent(false), 3800);
     } catch (err) {
-      toast.error(err?.message && err.message !== "Failed to send" ? err.message : "Failed. Try again.", { style: { background: "var(--surface)", color: "#ff6b6b", border: "1px solid #ff444460", borderRadius: 0 } });
+      toast.error("Failed. Try again.", { style: { background: "var(--surface)", color: "#ff6b6b", border: "1px solid #ff444460", borderRadius: 0 } });
       setLoading(false);
     }
   };

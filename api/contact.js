@@ -1,13 +1,22 @@
 // Vercel Serverless Function — proxies the contact form to EmailJS.
 //
-// Required environment variables (Vercel → Project → Settings → Environment
-// Variables, NO "VITE_" prefix). After adding/changing them you MUST redeploy.
+// Why this exists instead of calling EmailJS straight from the browser:
+//   1. Real per-IP rate limiting is only possible server-side. Browsers
+//      never expose a visitor's real IP to JavaScript, and any counter
+//      kept in the browser (localStorage etc.) is wiped by clearing site
+//      data or opening a private window — so it protects against nothing.
+//   2. EmailJS's private key (needed for their "Strict Mode" / server auth)
+//      must never be shipped to the browser. Keeping the whole email send
+//      server-side means none of your EmailJS credentials touch client code.
+//
+// Required environment variables (set in Vercel → Project → Settings →
+// Environment Variables, NOT prefixed with VITE_ — that prefix is what
+// tells Vite to bundle a value into the public browser JS, which is the
+// opposite of what we want here):
 //   EMAILJS_SERVICE_ID
 //   EMAILJS_TEMPLATE_ID
 //   EMAILJS_PUBLIC_KEY
-//   EMAILJS_PRIVATE_KEY
-// Optional (rate limiting — if missing, an in-memory limiter is used instead
-// of the whole form breaking):
+//   EMAILJS_PRIVATE_KEY   (EmailJS dashboard → Account → API Keys)
 //   UPSTASH_REDIS_REST_URL
 //   UPSTASH_REDIS_REST_TOKEN
 
@@ -15,52 +24,28 @@ import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 
 const DAILY_LIMIT_PER_IP = 12;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/* ── Rate limiter: Upstash if configured, otherwise in-memory fallback ── */
-let ratelimit = null;
-if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
-  ratelimit = new Ratelimit({
-    redis: new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN,
-    }),
-    limiter: Ratelimit.slidingWindow(DAILY_LIMIT_PER_IP, "1 d"),
-    analytics: false,
-    prefix: "contact-form",
-  });
-} else {
-  console.warn("Upstash env vars missing — using in-memory rate limit fallback.");
-}
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+});
 
-const memHits = new Map(); // ip -> [timestamps]
-function memoryLimit(ip) {
-  const now = Date.now();
-  const day = 24 * 60 * 60 * 1000;
-  const hits = (memHits.get(ip) || []).filter((t) => now - t < day);
-  if (hits.length >= DAILY_LIMIT_PER_IP) {
-    memHits.set(ip, hits);
-    return { success: false, limit: DAILY_LIMIT_PER_IP, remaining: 0, reset: hits[0] + day };
-  }
-  hits.push(now);
-  memHits.set(ip, hits);
-  return { success: true, limit: DAILY_LIMIT_PER_IP, remaining: DAILY_LIMIT_PER_IP - hits.length, reset: now + day };
-}
+const ratelimit = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(DAILY_LIMIT_PER_IP, "1 d"),
+  analytics: false,
+  prefix: "contact-form",
+});
 
 function getClientIp(req) {
+  // Vercel sets x-forwarded-for reliably at the edge; take the first
+  // (left-most) address, which is the original client.
   const fwd = req.headers["x-forwarded-for"];
   if (fwd) return fwd.split(",")[0].trim();
   return req.socket?.remoteAddress || "unknown";
 }
 
-// Vercel normally parses JSON bodies, but be defensive.
-function readBody(req) {
-  if (req.body && typeof req.body === "object") return req.body;
-  if (typeof req.body === "string") {
-    try { return JSON.parse(req.body); } catch { return {}; }
-  }
-  return {};
-}
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -68,24 +53,17 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // 1) Make sure EmailJS config exists — most common cause of failure.
-  const { EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, EMAILJS_PUBLIC_KEY, EMAILJS_PRIVATE_KEY } = process.env;
-  const missing = Object.entries({ EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, EMAILJS_PUBLIC_KEY, EMAILJS_PRIVATE_KEY })
-    .filter(([, v]) => !v)
-    .map(([k]) => k);
-  if (missing.length) {
-    console.error("Missing env vars:", missing.join(", "));
-    return res.status(500).json({ error: "Contact form is not configured yet.", code: "ENV_MISSING" });
-  }
-
-  // 2) Rate limit (never lets a Redis outage kill the form)
   const ip = getClientIp(req);
+
   let rl;
   try {
-    rl = ratelimit ? await ratelimit.limit(ip) : memoryLimit(ip);
+    rl = await ratelimit.limit(ip);
   } catch (err) {
-    console.error("Rate limiter error (continuing with in-memory fallback):", err);
-    rl = memoryLimit(ip);
+    // If Upstash is unreachable, fail closed on the side of NOT sending
+    // unlimited mail — better to briefly block real messages than to let
+    // rate limiting silently stop working.
+    console.error("Rate limiter error:", err);
+    return res.status(503).json({ error: "Service temporarily unavailable. Please try again shortly." });
   }
 
   res.setHeader("X-RateLimit-Limit", String(rl.limit));
@@ -99,10 +77,16 @@ export default async function handler(req, res) {
     });
   }
 
-  // 3) Validate
-  const { from_name, from_email, subject, message, company_website } = readBody(req);
+  const body = req.body || {};
+  const { from_name, from_email, subject, message, company_website } = body;
 
-  if (company_website) return res.status(200).json({ ok: true }); // honeypot
+  // Honeypot — real visitors never see or fill this field. If it's filled,
+  // silently pretend success so the bot doesn't learn it was caught, and
+  // we don't spend an EmailJS send (or count it against the real limit's
+  // usefulness for the person who owns this IP).
+  if (company_website) {
+    return res.status(200).json({ ok: true });
+  }
 
   if (!from_name || !from_email || !message) {
     return res.status(400).json({ error: "Please fill in your name, email, and message." });
@@ -119,23 +103,18 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "That doesn't look like a valid email address." });
   }
 
-  // 4) Send via EmailJS
   try {
     const emailRes = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        service_id: EMAILJS_SERVICE_ID,
-        template_id: EMAILJS_TEMPLATE_ID,
-        user_id: EMAILJS_PUBLIC_KEY,
-        accessToken: EMAILJS_PRIVATE_KEY,
+        service_id: process.env.EMAILJS_SERVICE_ID,
+        template_id: process.env.EMAILJS_TEMPLATE_ID,
+        user_id: process.env.EMAILJS_PUBLIC_KEY,
+        accessToken: process.env.EMAILJS_PRIVATE_KEY,
         template_params: {
           from_name,
           from_email,
-          // send several aliases so any template variable naming works
-          name: from_name,
-          email: from_email,
-          reply_to: from_email,
           subject: subject || "(no subject)",
           message,
         },
@@ -144,17 +123,13 @@ export default async function handler(req, res) {
 
     if (!emailRes.ok) {
       const text = await emailRes.text().catch(() => "");
-      // Visible in Vercel → Deployments → Functions/Logs
       console.error("EmailJS send failed:", emailRes.status, text);
-      return res.status(502).json({
-        error: "Failed to send your message. Please try again.",
-        code: `EMAILJS_${emailRes.status}`,
-      });
+      return res.status(502).json({ error: "Failed to send your message. Please try again." });
     }
 
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error("Contact API unexpected error:", err);
-    return res.status(500).json({ error: "Unexpected server error. Please try again.", code: "UNEXPECTED" });
+    return res.status(500).json({ error: "Unexpected server error. Please try again." });
   }
 }
