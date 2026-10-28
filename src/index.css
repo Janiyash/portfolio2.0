@@ -82,6 +82,10 @@ body.custom-cursor-active:not(.cursor-native) a,
 body.custom-cursor-active:not(.cursor-native) button,
 body.custom-cursor-active:not(.cursor-native) [data-hover] { cursor: none; }
 
+/* portrait: hide the native cursor ONLY while the custom cursor is actually running */
+.portrait-wrap { cursor: pointer; }
+body.custom-cursor-active .portrait-wrap { cursor: none; }
+
 /* ── CUSTOM CURSOR: HUD target-lock reticle ── */
 .cursor-dot { opacity: 0; transition: opacity 0.2s, scale 0.15s; }
 body.cursor-visible:not(.cursor-native) .cursor-dot { opacity: 1; }
@@ -145,6 +149,7 @@ body.cursor-visible:not(.cursor-native) .cursor-dot { opacity: 1; }
           mask-image: radial-gradient(ellipse var(--ro) var(--ro) at var(--mx) var(--my), #000 var(--ri), transparent var(--ro));
   transition: --ri 0.55s cubic-bezier(.22,1,.36,1), --ro 0.55s cubic-bezier(.22,1,.36,1);
 }
+.panther-mask.instant { transition: none; }
 .panther-mask.on-hover { --ri: 32%; --ro: 52%; }
 .panther-mask.on-full  { --ri: 120%; --ro: 150%; transition-duration: 0.9s; }
 

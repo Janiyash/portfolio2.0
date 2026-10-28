@@ -3,6 +3,8 @@
  *
  * Hover over the portrait → a circular spotlight follows your cursor,
  * revealing the Black Panther image underneath.
+ * Hover is detected at the WINDOW level (position vs. the portrait's rect),
+ * so it keeps working no matter which custom cursor / overlay is on top.
  * Move cursor → spotlight moves instantly.
  * Leave image → spotlight closes smoothly.
  * Touch → tap to toggle full reveal.
@@ -103,20 +105,67 @@ export default function CinematicPortrait({ className = "" }) {
     }
   }, []);
 
-  const onPointerEnter = (e) => {
-    lastType.current = e.pointerType;
-    if (e.pointerType !== "mouse") return;
-    place(e);
-    setMode("hover");
-  };
-  const onPointerMove  = (e) => {
-    if (e.pointerType !== "mouse") return;
-    place(e);
-  };
-  const onPointerLeave = (e) => {
-    if (e.pointerType !== "mouse") return;
-    setMode("off");
-  };
+  /* ── Hover detection ──────────────────────────────────────────
+     Listens on window and hit-tests the pointer against the portrait's
+     rectangle instead of relying on pointerenter/leave on the element.
+     That makes it immune to custom-cursor layers, overlays and
+     pointer-events changes sitting above the portrait. */
+  const lastPt  = useRef(null);
+  const inside  = useRef(false);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+
+    const evaluate = () => {
+      const pt = lastPt.current;
+      if (!pt) return;
+      const r = wrap.getBoundingClientRect();
+      const hit = pt.x >= r.left && pt.x <= r.right && pt.y >= r.top && pt.y <= r.bottom;
+      if (hit) {
+        place(pt);
+        if (!inside.current) {
+          inside.current = true;
+          setMode((m) => (m === "full" ? m : "hover"));
+        }
+      } else if (inside.current) {
+        inside.current = false;
+        setMode((m) => (m === "hover" ? "off" : m));
+      }
+    };
+
+    const onMove = (e) => {
+      const type = e.pointerType || (lastType.current === "touch" ? "touch" : "mouse");
+      lastType.current = type;
+      if (type === "touch") return;           // touch uses tap-to-toggle
+      lastPt.current = { clientX: e.clientX, clientY: e.clientY, x: e.clientX, y: e.clientY };
+      evaluate();
+    };
+    const onLeaveDoc = () => {
+      lastPt.current = null;
+      if (inside.current) {
+        inside.current = false;
+        setMode((m) => (m === "hover" ? "off" : m));
+      }
+    };
+
+    window.addEventListener("pointermove", onMove, { passive: true, capture: true });
+    window.addEventListener("mousemove",   onMove, { passive: true, capture: true });
+    window.addEventListener("scroll", evaluate, { passive: true });
+    document.documentElement.addEventListener("mouseleave", onLeaveDoc);
+    return () => {
+      window.removeEventListener("pointermove", onMove, { capture: true });
+      window.removeEventListener("mousemove",   onMove, { capture: true });
+      window.removeEventListener("scroll", evaluate);
+      document.documentElement.removeEventListener("mouseleave", onLeaveDoc);
+    };
+  }, [place]);
+
+  /* keep the gold ring on the cursor the moment it mounts */
+  useEffect(() => {
+    if (mode === "hover" && lastPt.current) place(lastPt.current);
+  }, [mode, place]);
+
   const onPointerDown  = (e) => { lastType.current = e.pointerType; };
 
   const onClick = (e) => {
@@ -138,20 +187,15 @@ export default function CinematicPortrait({ className = "" }) {
 
   const maskClass =
     "absolute inset-0 z-20 pointer-events-none " +
-    (reduced ? "" : "panther-mask ") +
+    "panther-mask " +
+    (reduced ? "instant " : "") +
     (mode === "hover" ? "on-hover" : mode === "full" ? "on-full" : "");
-
-  const reducedStyle = reduced
-    ? { opacity: active ? 1 : 0, transition: "opacity 0.3s ease" }
-    : undefined;
 
   return (
     <div
       ref={wrapRef}
-      className={`relative select-none ${className}`}
-      onPointerEnter={onPointerEnter}
-      onPointerMove={onPointerMove}
-      onPointerLeave={onPointerLeave}
+      className={`portrait-wrap relative select-none ${className}`}
+      data-cursor-ignore
       onPointerDown={onPointerDown}
       onClick={onClick}
       role="button"
@@ -165,7 +209,6 @@ export default function CinematicPortrait({ className = "" }) {
         }
       }}
       style={{
-        cursor: "none",
         touchAction: "manipulation",
         WebkitTapHighlightColor: "transparent",
         WebkitTouchCallout: "none",
@@ -207,7 +250,6 @@ export default function CinematicPortrait({ className = "" }) {
           ref={maskRef}
           aria-hidden="true"
           className={maskClass}
-          style={reducedStyle}
         >
           <img
             src={pantherActivated}
@@ -221,7 +263,7 @@ export default function CinematicPortrait({ className = "" }) {
         </div>
 
         {/* LAYER 3 — gold ring that follows cursor (mouse only) */}
-        {!reduced && mode === "hover" && (
+        {mode === "hover" && (
           <div
             ref={ringRef}
             aria-hidden="true"

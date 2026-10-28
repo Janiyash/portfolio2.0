@@ -119,6 +119,7 @@ export default function CustomCursor() {
     const resolve = (el) => {
       if (!(el instanceof Element)) return null;
       if (el.closest("input, textarea, select, [contenteditable='true']")) return { native: true };
+      if (el.closest("[data-cursor-ignore]")) return null; // e.g. the portrait draws its own ring
       const c = el.closest("[data-cursor]");
       const lock = el.closest("a, button, [role='button'], [data-hover], [data-cursor]");
       if (!lock) return null;
